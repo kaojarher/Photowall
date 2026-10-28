@@ -276,6 +276,8 @@
       </div>
 
       <div id="conn-status" class="hidden text-center text-xs"></div>
+      <div id="conn-diag" class="hidden text-center text-[10px] text-slate-500"></div>
+      <div class="text-center"><button id="btn-reconnect" onclick="reconnectNow()" class="hidden px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs border border-slate-600 transition">🔄 重新連線</button></div>
 
       <div class="relative group">
         <input type="file" id="camera-input" accept="image/*" multiple onchange="handleImageSelect(event)" class="hidden">
@@ -388,7 +390,7 @@
         e.preventDefault();
         const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
         for (const f of files) {
-          try { await submitPhoto(await imageFileToPng(f)); } catch (err) { console.warn('傳送失敗:', err); }
+          try { await submitPhoto(await processImageFile(f)); } catch (err) { console.warn('傳送失敗:', err); }
         }
       });
 
@@ -685,6 +687,7 @@
     }
 
     // ===== 音樂播放（含內建晨光、本機音樂、自訂網址）=====
+    let selectedItem = null;
     let corsMode = true;
     let fallbackTried = false;
     let currentTrackUrl = '';
@@ -1031,11 +1034,18 @@
         conn.on('open', () => { connectedPhones.add(conn.peer); updatePhoneCount(); });
         conn.on('close', () => { connectedPhones.delete(conn.peer); updatePhoneCount(); });
         conn.on('data', async d => {
+          const isJpeg = d && d.fmt === 'jpeg';
           const ok = d && d.type === 'photo' && typeof d.url === 'string' &&
-                     d.url.startsWith('data:image/') && d.url.length < 4000000;
-          if (!ok) { try { conn.send({ type: 'nack', id: d && d.id }); } catch (e) {} return; }
-          try { await addPhotos([d.url]); conn.send({ type: 'ack', id: d.id }); }
-          catch (e) { try { conn.send({ type: 'nack', id: d.id }); } catch (e2) {} }
+                     d.url.startsWith(isJpeg ? 'data:image/jpeg' : 'data:image/') && d.url.length < 4000000;
+          if (!ok) { try { conn.send({ type: 'nack', id: d && d.id, reason: '格式不符或檔案過大' }); } catch (e) {} return; }
+          try {
+            const png = isJpeg ? await jpegToTransparentPng(d.url) : d.url;
+            await addPhotos([png]);
+            conn.send({ type: 'ack', id: d.id });
+          } catch (e) {
+            console.warn('大螢幕處理失敗:', e);
+            try { conn.send({ type: 'nack', id: d.id, reason: '大螢幕處理失敗：' + (e && e.message || e) }); } catch (e2) {}
+          }
         });
       });
       peer.on('disconnected', () => {
@@ -1061,6 +1071,22 @@
       el.classList.remove('hidden');
       el.textContent = text;
       el.className = 'text-center text-xs ' + (ok ? 'text-emerald-400' : 'text-amber-300');
+      const btn = document.getElementById('btn-reconnect');
+      if (btn) btn.classList.toggle('hidden', !!ok);
+    }
+    function setDiag(text) {
+      const el = document.getElementById('conn-diag');
+      if (!el) return;
+      el.classList.remove('hidden');
+      el.textContent = text;
+    }
+    function reconnectNow() {
+      clearTimeout(reconnectTimer);
+      setConnStatus('重新連線中...', false);
+      if (!peer || peer.destroyed) { initRemote(hostId); return; }
+      if (peer.disconnected) { try { peer.reconnect(); } catch (e) {} }
+      if (remoteConn) { try { remoteConn.close(); } catch (e) {} remoteConn = null; }
+      connectToHost();
     }
     function initRemote(id) {
       isRemote = true;
@@ -1086,16 +1112,28 @@
       if (remoteConn) { try { remoteConn.close(); } catch (e) {} }
       const conn = peer.connect(hostId, { reliable: true });
       remoteConn = conn;
-      conn.on('open', () => setConnStatus('✅ 已連線到大螢幕', true));
+      setDiag('ID：' + hostId + '｜點對點連線建立中...');
+      try {
+        const pc = conn.peerConnection;
+        if (pc) pc.addEventListener('iceconnectionstatechange', () => setDiag('ID：' + hostId + '｜ICE：' + pc.iceConnectionState));
+      } catch (e) {}
+      // 15 秒內沒連上：提示可能原因
+      setTimeout(() => {
+        if (remoteConn === conn && !conn.open) {
+          setConnStatus('連線逾時：請確認大螢幕頁面開著、QR Code 是最新的；或換用同一個 Wi‑Fi 再試', false);
+          scheduleReconnect();
+        }
+      }, 15000);
+      conn.on('open', () => { setConnStatus('✅ 已連線到大螢幕', true); setDiag('ID：' + hostId + '｜已連線'); });
       conn.on('data', d => {
         if (!d || (d.type !== 'ack' && d.type !== 'nack')) return;
         const p = pending.get(d.id);
         if (!p) return;
         pending.delete(d.id);
-        if (d.type === 'ack') p.resolve(); else p.reject(new Error('大螢幕拒絕了這張照片'));
+        if (d.type === 'ack') p.resolve(); else p.reject(new Error(d.reason || '大螢幕拒絕了這張照片'));
       });
       conn.on('close', () => { setConnStatus('連線中斷，重試中...', false); scheduleReconnect(); });
-      conn.on('error', () => scheduleReconnect());
+      conn.on('error', err => { console.warn('連線錯誤:', err); setConnStatus('點對點連線失敗（此網路可能封鎖直連），重試中...', false); scheduleReconnect(); });
     }
     function scheduleReconnect() {
       clearTimeout(reconnectTimer);
@@ -1106,23 +1144,27 @@
     }
     function sendRemote(url) {
       return new Promise((resolve, reject) => {
-        if (!remoteConn || !remoteConn.open) return reject(new Error('尚未連線到大螢幕'));
+        if (!remoteConn || !remoteConn.open) return reject(new Error('尚未連線到大螢幕，請稍候或按「重新連線」'));
         const id = ++msgSeq;
-        const timer = setTimeout(() => { pending.delete(id); reject(new Error('傳送逾時')); }, 20000);
+        const timer = setTimeout(() => { pending.delete(id); reject(new Error('傳送逾時（20 秒），請確認大螢幕頁面還開著')); }, 20000);
         pending.set(id, {
           resolve: () => { clearTimeout(timer); resolve(); },
           reject: e => { clearTimeout(timer); reject(e); }
         });
-        try { remoteConn.send({ type: 'photo', id, url }); }
+        try { remoteConn.send({ type: 'photo', id, fmt: url.fmt, url: url.url }); }
         catch (e) { clearTimeout(timer); pending.delete(id); reject(e); }
       });
     }
     // 手機端走 P2P；大螢幕本機操作則直接存入本機
-    function submitPhoto(url) { return isRemote ? sendRemote(url) : addPhotos([url]); }
+    function submitPhoto(item) {
+      const png = typeof item === 'string' ? item : item.png;
+      if (!isRemote) return addPhotos([png]);
+      return sendRemote(typeof item === 'string' ? { fmt: 'png', url: item } : { fmt: 'jpeg', url: item.jpeg });
+    }
 
     
-// 圖片檔 → 縮圖 + 自動去白底 → PNG dataURL
-    function imageFileToPng(file) {
+// 圖片檔 → 縮圖；回傳 { png: 去白底 PNG, jpeg: 傳輸用小檔 }
+    function processImageFile(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(reader.error);
@@ -1138,13 +1180,34 @@
             canvas.width = Math.max(1, Math.round(width));
             canvas.height = Math.max(1, Math.round(height));
             const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';                       // JPEG 無透明度，先鋪白底
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const jpeg = canvas.toDataURL('image/jpeg', 0.85);   // 約為 PNG 的 1/5～1/10，傳輸快很多
             removeWhiteBackground(ctx, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/png'));
+            resolve({ png: canvas.toDataURL('image/png'), jpeg });
           };
           img.src = e.target.result;
         };
         reader.readAsDataURL(file);
+      });
+    }
+    async function imageFileToPng(file) { return (await processImageFile(file)).png; }
+
+    // 大螢幕端：收到 JPEG 後在本機去白底，轉成透明 PNG
+    function jpegToTransparentPng(dataUrl) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('圖片格式錯誤'));
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width; canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          removeWhiteBackground(ctx, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.src = dataUrl;
       });
     }
 
@@ -1156,12 +1219,15 @@
       // 多張：直接加入照片牆
       if (files.length > 1) {
         status.innerText = `處理 ${files.length} 張照片中...`;
-        let ok = 0;
+        let ok = 0, lastErr = '';
         for (const f of files) {
-          try { await submitPhoto(await imageFileToPng(f)); ok++; }
-          catch (err) { console.warn('圖片處理失敗:', err); }
+          try { await submitPhoto(await processImageFile(f)); ok++; }
+          catch (err) { console.warn('圖片處理失敗:', err); lastErr = (err && err.message) || '未知錯誤'; }
         }
-        status.innerHTML = `<span class="text-emerald-400"><i class="fa-solid fa-circle-check"></i> 已加入 ${ok} 張照片</span>`;
+        const failed = files.length - ok;
+        status.innerHTML = failed === 0
+          ? `<span class="text-emerald-400"><i class="fa-solid fa-circle-check"></i> 已送出 ${ok} 張照片</span>`
+          : `<span class="text-rose-400">成功 ${ok} 張、失敗 ${failed} 張：${lastErr}</span>`;
         event.target.value = '';
         setTimeout(() => { status.innerText = ''; }, 2500);
         return;
@@ -1170,7 +1236,8 @@
       // 單張：先預覽再確認
       status.innerText = '處理中（自動去背）...';
       try {
-        selectedImageBase64 = await imageFileToPng(files[0]);
+        selectedItem = await processImageFile(files[0]);
+        selectedImageBase64 = selectedItem.png;
       } catch (err) {
         console.error(err);
         status.innerHTML = `<span class="text-rose-400">圖片讀取失敗，請換一張</span>`;
@@ -1193,7 +1260,7 @@
       btnUpload.disabled = true;
       btnUpload.innerText = "⏳ 加入中...";
       try {
-        await submitPhoto(selectedImageBase64);
+        await submitPhoto(selectedItem || selectedImageBase64);
         status.innerHTML = `<span class="text-emerald-400"><i class="fa-solid fa-circle-check"></i> 已送到照片牆</span>`;
         btnUpload.innerText = "加入照片牆";
         setTimeout(() => {
@@ -1201,6 +1268,7 @@
           document.getElementById('upload-placeholder').classList.remove('hidden');
           document.getElementById('camera-input').value = '';
           selectedImageBase64 = null;
+          selectedItem = null;
           status.innerText = '';
         }, 1500);
       } catch (err) {
