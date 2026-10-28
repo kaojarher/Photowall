@@ -56,6 +56,48 @@
       background: rgba(99, 102, 241, 0.5);
       border-radius: 8px;
     }
+
+    /* ===== 便利貼牆 ===== */
+    #wall { scrollbar-width: none; }
+    #wall::-webkit-scrollbar { display: none; }
+    .sticky-note {
+      position: absolute; left: 0; top: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(160deg, var(--paper) 0%, var(--paper2) 100%);
+      border-radius: 2px 2px 14px 2px;
+      box-shadow: 0 12px 20px rgba(0,0,0,.45), 0 2px 4px rgba(0,0,0,.35);
+      transition: transform .8s cubic-bezier(.2,.9,.3,1.05), width .6s ease, height .6s ease, opacity .5s ease;
+      will-change: transform;
+    }
+    .sticky-note::before {          /* 上緣黏膠陰影 */
+      content: ''; position: absolute; left: 0; right: 0; top: 0; height: 13%;
+      background: linear-gradient(rgba(0,0,0,.10), transparent);
+      border-radius: 2px 2px 0 0; pointer-events: none;
+    }
+    .sticky-note::after {           /* 右下角翹起 */
+      content: ''; position: absolute; right: 0; bottom: 0; width: 24%; height: 24%;
+      background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,.16) 50%, rgba(255,255,255,.35) 100%);
+      border-radius: 0 0 14px 0; pointer-events: none;
+    }
+    .sticky-note img {
+      width: 84%; height: 84%; object-fit: contain; margin-top: 7%;
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,.28));
+      user-select: none; -webkit-user-drag: none;
+    }
+    .sticky-note.fly { transition: none; box-shadow: 0 22px 34px rgba(0,0,0,.55), 0 4px 8px rgba(0,0,0,.4); }
+    .sticky-note.peeled { opacity: .12; }
+
+    /* ===== 選單自動隱藏（滑鼠移到上緣才顯示）===== */
+    .auto-ui { transition: opacity .35s ease, transform .35s ease; }
+    body.autohide:not(.ui-show) #top-ui { opacity: 0; transform: translateY(-110%); pointer-events: none; }
+    body.autohide:not(.ui-show) .auto-ui-br { opacity: 0; transform: translateY(24px); pointer-events: none; }
+    #ui-hint {
+      position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+      width: 64px; height: 4px; border-radius: 0 0 4px 4px;
+      background: rgba(255,255,255,.35); opacity: 0; transition: opacity .4s;
+      z-index: 39; pointer-events: none;
+    }
+    body.autohide:not(.ui-show) #ui-hint { opacity: 1; }
   </style>
 
   <!-- QRCode.js 與 PeerJS（WebRTC） -->
@@ -83,7 +125,7 @@
           <li>手機掃碼要打開的是這份網頁，所以請先把本檔案放到免費靜態網站空間（例如 GitHub Pages、Netlify），取得網址。</li>
           <li>在<b>大螢幕電腦</b>用瀏覽器（建議 Chrome / Edge）開啟該網址。</li>
           <li>若你是雙擊檔案或用 localhost 開啟，請按右下角「⚙ 網址」，貼上部署後的網址並按「套用」，QR Code 才會正確。</li>
-          <li>右下角顯示「已就緒，等待手機連線」即可開始。</li>
+          <li>QR Code 與連線狀態在右下角，顯示「已就緒，等待手機連線」即可開始。選單與 QR Code 平時會隱藏，滑鼠移到畫面最上緣即可叫出。</li>
         </ol>
       </section>
 
@@ -102,7 +144,9 @@
         <h3 class="font-bold text-amber-300">③ 大螢幕上的操作</h3>
         <ul class="list-disc pl-5 space-y-1 leading-relaxed">
           <li><b>🖼 本機選圖</b>或把圖片<b>直接拖曳</b>到畫面：在大螢幕電腦上直接加入照片。</li>
-          <li><b>衝場動畫</b>：每 3 分鐘自動觸發，照片會在畫面中漫遊；也可按控制列的按鈕手動觸發。</li>
+          <li><b>便利貼牆</b>：每張照片會像便利貼一樣貼在牆上，新照片會「啪」地貼上；照片多時會自動縮小，超過畫面可用滑鼠滾輪往下捲。</li>
+          <li><b>衝場動畫</b>：每 3 分鐘自動觸發，每張便利貼會從牆上撕下，由左向右飛過畫面，再貼回牆上；也可在選單按「立即衝場」手動觸發。</li>
+          <li><b>選單自動隱藏</b>：開啟後前 20 秒會顯示標題、倒數、音樂控制與 QR Code，之後自動隱藏。把滑鼠移到畫面<b>最上緣</b>即可再次顯示（離開後約 2.5 秒收起）。按鍵盤 <b>H</b> 可固定顯示或取消固定。</li>
           <li><b>清空</b>：按控制列的紅色清空按鈕，可刪除所有照片（無法復原）。</li>
         </ul>
       </section>
@@ -146,7 +190,8 @@
   <canvas id="fireflies-canvas" class="fixed inset-0 pointer-events-none z-0"></canvas>
 
   <!-- 頂部導覽列與模式切換 -->
-  <header class="fixed top-0 left-0 right-0 z-40 p-4 flex justify-between items-center glass-dark">
+  <div id="top-ui" class="auto-ui fixed top-0 left-0 right-0 z-40">
+  <header class="relative w-full p-4 flex justify-between items-center glass-dark">
     <div class="flex items-center gap-3">
       <div class="p-2 bg-gradient-to-tr from-indigo-500 via-amber-400 to-emerald-400 rounded-xl shadow-lg">
         <i class="fa-solid font-bold fa-camera-retro text-xl text-slate-950"></i>
@@ -173,9 +218,7 @@
     </div>
   </header>
 
-  <!-- ==================== 1. 大螢幕展示端 ==================== -->
-  <main id="section-display" class="pt-20 min-h-screen relative z-10 flex flex-col justify-between overflow-hidden">
-    
+  <div id="display-controls" class="px-4 pt-2">
     <!-- 控制列 -->
     <div class="w-full max-w-6xl mx-auto px-4 py-2 z-30 flex flex-wrap items-center justify-between gap-4 glass-dark rounded-2xl my-2 border border-slate-800">
       
@@ -224,24 +267,29 @@
         </button>
       </div>
     </div>
-
-    <!-- 靜態展覽照片牆 -->
-    <div class="flex-1 max-w-7xl w-full mx-auto p-4 z-10 flex flex-col justify-center">
-      <div id="photo-count-badge" class="mb-3 text-xs text-slate-300 flex items-center gap-2">
+    <div id="photo-count-badge" class="max-w-6xl mx-auto px-6 pb-2 text-xs text-slate-300 flex items-center gap-2">
         <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-        照片牆共 <span id="photo-count" class="font-bold text-amber-300">0</span> 張相片（照片已自動去背景，每 3 分鐘衝場漫遊）
+        便利貼牆共 <span id="photo-count" class="font-bold text-amber-300">0</span> 張（每 3 分鐘便利貼由左向右衝場）
       </div>
-      
-      <div id="gallery-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 max-h-[60vh] overflow-y-auto p-2 rounded-2xl glass custom-scrollbar">
-        <div id="empty-state" class="col-span-full py-16 text-center text-slate-400">
-          <i class="fa-solid fa-images text-4xl mb-3 opacity-40"></i>
-          <p class="text-sm">目前尚無照片，請按右下角「選擇照片」，或把圖片拖曳到畫面！</p>
-        </div>
-      </div>
+  </div>
+  </div>
+
+  <!-- ==================== 1. 大螢幕展示端（便利貼牆）==================== -->
+  <main id="section-display" class="fixed inset-0 z-10 overflow-hidden">
+    <div id="wall" class="absolute inset-0 overflow-y-auto overflow-x-hidden">
+      <div id="wall-inner" class="relative w-full"></div>
     </div>
 
+    <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-400 pointer-events-none px-6">
+      <i class="fa-solid fa-note-sticky text-5xl mb-4 text-amber-300/60"></i>
+      <p class="text-base">便利貼牆還是空的</p>
+      <p class="text-sm mt-1 text-slate-500">把滑鼠移到畫面最上緣，用手機掃 QR Code 傳照片；或直接把圖片拖曳到畫面</p>
+    </div>
+
+    <div id="ui-hint"></div>
+
     <!-- 手機掃碼傳照片（WebRTC 直連） -->
-    <div class="fixed bottom-4 right-4 z-30 glass-dark p-3 rounded-2xl border border-slate-700 shadow-2xl max-w-[19rem] space-y-2">
+    <div class="auto-ui auto-ui-br fixed bottom-4 right-4 z-30 glass-dark p-3 rounded-2xl border border-slate-700 shadow-2xl max-w-[19rem] space-y-2">
       <div class="flex items-center gap-3">
         <div id="qrcode" class="bg-white p-1.5 rounded-xl shadow shrink-0"></div>
         <div class="text-left">
@@ -317,6 +365,7 @@
     const STORE = 'photos';
     let idb = null;
     let memList = [];
+    let memSeq = 0;
     const channel = ('BroadcastChannel' in window) ? new BroadcastChannel('photo-wall-local') : null;
 
     function openDB() {
@@ -344,7 +393,7 @@
     }
     async function dbAdd(url) {
       const rec = { url, createdAt: Date.now() };
-      if (!idb) { rec.id = Date.now() + Math.random(); memList.push(rec); return; }
+      if (!idb) { rec.id = ++memSeq; memList.push(rec); return; }
       await idbRun('readwrite', st => st.add(rec));
     }
     async function dbClear() {
@@ -375,6 +424,7 @@
         if (hostParam) initRemote(hostParam);      // 手機端：連到大螢幕
       } else {
         switchMode('display');
+        initAutoHide();
         startSprintCountdown();
         initFirefliesCanvas();
         initHost();                                // 大螢幕端：等待手機連線
@@ -411,13 +461,20 @@
       const btnUpload = document.getElementById('btn-show-upload');
       const subtitle = document.getElementById('mode-subtitle');
 
+      const controls = document.getElementById('display-controls');
       if (mode === 'display') {
+        document.body.classList.add('autohide');
+        controls.classList.remove('hidden');
+        setTimeout(layoutWall, 0);
+        armAutoHide(8000);
         displaySec.classList.remove('hidden');
         uploadSec.classList.add('hidden');
         btnDisplay.className = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-md hover:bg-indigo-500 transition";
         btnUpload.className = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition";
         subtitle.innerText = "大螢幕展示模式（自動去背 & 螢火蟲律動）";
       } else {
+        document.body.classList.remove('autohide', 'ui-show');
+        controls.classList.add('hidden');
         displaySec.classList.add('hidden');
         uploadSec.classList.remove('hidden');
         btnUpload.className = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-md hover:bg-indigo-500 transition";
@@ -449,33 +506,104 @@
       if (channel) channel.postMessage('changed');
     }
 
-    function updateGalleryUI() {
-      const grid = document.getElementById('gallery-grid');
-      const countBadge = document.getElementById('photo-count');
-      if (!window._emptyStateEl) window._emptyStateEl = document.getElementById('empty-state');
-      const emptyState = window._emptyStateEl;   // 先快取：innerHTML 清空後 DOM 內就找不到它了
-      
-      countBadge.innerText = photosList.length;
+    // ===== 便利貼牆 =====
+    const NOTE_COLORS = [
+      ['#fff59d', '#ffee58'], ['#ffc1dc', '#ff9ec7'], ['#b9f6ca', '#8fe9ad'],
+      ['#b3e5fc', '#81d4fa'], ['#ffe0b2', '#ffcc80'], ['#e1bee7', '#ce93d8']
+    ];
+    const noteEls = new Map();      // 照片 id → 牆上的便利貼元素
+    let wallFirstRender = true;
 
-      if (photosList.length === 0) {
-        grid.innerHTML = '';
-        grid.appendChild(emptyState);
-        return;
-      }
-
-      grid.innerHTML = '';
-      photosList.forEach(item => {
-        const div = document.createElement('div');
-        div.className = "photo-grid-item relative group aspect-square rounded-xl overflow-hidden border border-slate-700/60 bg-slate-900/80 p-2 flex items-center justify-center";
-        div.innerHTML = `
-          <img src="${item.url}" class="w-full h-full object-contain filter drop-shadow-md" alt="photo">
-          <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
-            <span class="text-[10px] text-slate-300 truncate">${new Date(item.createdAt).toLocaleTimeString()}</span>
-          </div>
-        `;
-        grid.appendChild(div);
-      });
+    function rnd(seed, salt) {      // 依照片 id 產生固定的「隨機」數，重新排版時不會亂跳
+      const x = Math.sin((Number(seed) || 0) * 12.9898 + salt * 78.233) * 43758.5453;
+      return x - Math.floor(x);
     }
+
+    function buildNote(item) {
+      const el = document.createElement('div');
+      el.className = 'sticky-note';
+      const col = NOTE_COLORS[Math.floor(rnd(item.id, 1) * NOTE_COLORS.length)];
+      el.style.setProperty('--paper', col[0]);
+      el.style.setProperty('--paper2', col[1]);
+      const img = document.createElement('img');
+      img.src = item.url;
+      img.alt = '';
+      img.draggable = false;
+      el.appendChild(img);
+      return el;
+    }
+
+    function layoutWall() {
+      const wall = document.getElementById('wall');
+      const inner = document.getElementById('wall-inner');
+      const empty = document.getElementById('empty-state');
+      if (!wall || !inner) return;
+      const W = wall.clientWidth, H = wall.clientHeight;
+      if (!W || !H) return;                         // 展示區被隱藏時不排版
+
+      const list = photosList.slice().sort((a, b) => a.createdAt - b.createdAt);
+      const N = list.length;
+      empty.classList.toggle('hidden', N > 0);
+
+      const keep = new Set(list.map(i => String(i.id)));
+      noteEls.forEach((el, id) => { if (!keep.has(id)) { el.remove(); noteEls.delete(id); } });
+      if (N === 0) { inner.style.height = H + 'px'; return; }
+
+      // 找出能全部放進畫面的最大格子；放不下就改為固定最小尺寸並可往下捲動
+      const pad = 28, MIN = 96;
+      const maxSize = Math.min(W, H) * 0.36;
+      let best = { cols: 1, rows: N, cell: 0 };
+      for (let cols = 1; cols <= N; cols++) {
+        const rows = Math.ceil(N / cols);
+        const cell = Math.min((W - pad * 2) / cols, (H - pad * 2) / rows);
+        if (cell > best.cell) best = { cols, rows, cell };
+      }
+      let cols = best.cols, rows = best.rows, wallH = H;
+      if (best.cell < MIN) {
+        cols = Math.max(1, Math.floor((W - pad * 2) / MIN));
+        rows = Math.ceil(N / cols);
+        wallH = Math.max(H, rows * MIN + pad * 2);
+      }
+      const cw = (W - pad * 2) / cols, ch = (wallH - pad * 2) / rows;
+      const cellMin = Math.min(cw, ch);
+      const size = Math.min(maxSize, cellMin * 0.86);
+      const slack = Math.max(0, cellMin - size) / 2;
+      inner.style.height = wallH + 'px';
+
+      list.forEach((item, idx) => {
+        const key = String(item.id);
+        const r = Math.floor(idx / cols), c = idx % cols;
+        const inRow = (r === rows - 1) ? (N - (rows - 1) * cols) : cols;
+        const shift = (cols - inRow) * cw / 2;                    // 最後一列置中
+        const x = pad + shift + c * cw + (cw - size) / 2 + (rnd(item.id, 2) - 0.5) * 2 * slack * 0.8;
+        const y = pad + r * ch + (ch - size) / 2 + (rnd(item.id, 3) - 0.5) * 2 * slack * 0.8;
+        const rot = (rnd(item.id, 4) - 0.5) * 14;
+
+        let el = noteEls.get(key);
+        const isNew = !el;
+        if (!el) { el = buildNote(item); inner.appendChild(el); noteEls.set(key, el); }
+        el.style.width = size + 'px';
+        el.style.height = size + 'px';
+        const tf = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
+        el.style.transform = tf;
+
+        if (isNew && el.animate) {                                // 「啪」地貼上牆
+          el.animate([
+            { transform: `translate(${x}px, ${y - 70}px) rotate(${rot + 12}deg) scale(1.7)`, opacity: 0 },
+            { transform: tf, opacity: 1 }
+          ], { duration: 600, delay: wallFirstRender ? Math.min(idx * 45, 1500) : 0, easing: 'cubic-bezier(.2,.9,.3,1)', fill: 'backwards' });
+        }
+      });
+      wallFirstRender = false;
+    }
+
+    function updateGalleryUI() {
+      document.getElementById('photo-count').innerText = photosList.length;
+      layoutWall();
+    }
+
+    let _resizeT = null;
+    window.addEventListener('resize', () => { clearTimeout(_resizeT); _resizeT = setTimeout(layoutWall, 150); });
 
     // 螢火蟲動畫 Canvas
     const fireflies = [];
@@ -597,25 +725,26 @@
     // 倒數計時與衝場邏輯
     function startSprintCountdown() {
       if (sprintTimer) clearInterval(sprintTimer);
-      
+
       sprintTimer = setInterval(() => {
         countdownSeconds--;
-        
+
         const mins = Math.floor(countdownSeconds / 60);
-        const secs = countdownSeconds % 60;
-        document.getElementById('timer-display').innerText = 
-          `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const secs = Math.max(0, countdownSeconds % 60);
+        document.getElementById('timer-display').innerText =
+          `${String(Math.max(0, mins)).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
         if (countdownSeconds <= 0) {
-          triggerSprint();
+          triggerSprint(true);          // 自動觸發：沒有照片就靜默略過，不跳出提示
           countdownSeconds = 180;
         }
       }, 1000);
     }
 
-    function triggerSprint() {
+    // 衝場：每張便利貼由左向右飛過
+    function triggerSprint(auto) {
       if (photosList.length === 0) {
-        alert('目前還沒有照片可以衝場喔！請先新增照片。');
+        if (auto !== true) alert('目前還沒有照片可以衝場喔！請先新增照片。');
         return;
       }
       if (isSprintRunning) return;
@@ -627,63 +756,114 @@
 
       const audio = document.getElementById('bgm-player');
       const currentVol = audio.volume;
-      if (!audio.paused) {
-        audio.volume = Math.min(1, currentVol * 1.3);
-      }
+      if (!audio.paused) audio.volume = Math.min(1, currentVol * 1.3);
 
-      const sprintCount = Math.min(photosList.length * 3, 30);
-      for (let i = 0; i < sprintCount; i++) {
-        const photoData = photosList[i % photosList.length];
-        const img = document.createElement('img');
-        img.src = photoData.url;
-        img.className = 'sprint-photo';
+      const W = window.innerWidth, H = window.innerHeight;
+      const shuffle = arr => arr.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
 
-        const size = Math.floor(Math.random() * 150) + 120;
-        img.style.width = `${size}px`;
-        img.style.height = `${size}px`;
+      // 照片少於 8 張時重複幾輪，畫面才不會太空
+      const rounds = photosList.length < 8 ? Math.ceil(8 / photosList.length) : 1;
+      let queue = [];
+      for (let r = 0; r < rounds; r++) queue = queue.concat(shuffle(photosList));
 
-        const startX = Math.random() < 0.5 ? -300 : window.innerWidth + 300;
-        const startY = Math.random() * window.innerHeight;
-        const targetX = Math.random() * (window.innerWidth - size);
-        const targetY = Math.random() * (window.innerHeight - size);
-        const endX = Math.random() < 0.5 ? window.innerWidth + 300 : -300;
-        const endY = Math.random() * window.innerHeight;
+      const N = queue.length;
+      const base = Math.min(W, H) * 0.26;
+      const spread = Math.min(12000, N * 650);                    // 出發時間分散到這段期間
+      const lanes = Math.max(3, Math.min(6, Math.floor(H / (base * 0.9))));
+      const laneOrder = shuffle([...Array(lanes).keys()]);
+      const finished = [];
+      let maxEnd = 0;
 
-        const duration = Math.random() * 2500 + 3500;
-        const delay = Math.random() * 2000;
+      queue.forEach((item, i) => {
+        const size = Math.round(base * (0.8 + Math.random() * 0.35));
+        const el = buildNote(item);
+        el.classList.add('fly');
+        el.style.width = size + 'px';
+        el.style.height = size + 'px';
+        container.appendChild(el);
 
-        container.appendChild(img);
+        const laneH = (H - size) / Math.max(1, lanes - 1);
+        const y = Math.max(0, Math.min(H - size, laneOrder[i % lanes] * laneH + (Math.random() - 0.5) * laneH * 0.3));
+        const dur = 6500 + Math.random() * 2500;
+        const delay = i * spread / N + Math.random() * 250;
+        const r0 = (Math.random() - 0.5) * 16;
+        const bob = 20 + Math.random() * 30;
+        const startX = -size - 80, endX = W + 80;
 
-        img.animate([
-          { 
-            transform: `translate3d(${startX}px, ${startY}px, 0px) rotate(0deg) scale(0.2)`, 
-            opacity: 0 
-          },
-          { 
-            transform: `translate3d(${targetX}px, ${targetY}px, 200px) rotate(${Math.random() * 360}deg) scale(1.3)`, 
-            opacity: 1, 
-            offset: 0.5 
-          },
-          { 
-            transform: `translate3d(${endX}px, ${endY}px, 0px) rotate(${Math.random() * 720}deg) scale(0.1)`, 
-            opacity: 0 
-          }
-        ], {
-          duration: duration,
-          delay: delay,
-          easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
-          fill: 'forwards'
-        });
-      }
+        const frames = [];
+        for (let k = 0; k <= 8; k++) {
+          const o = k / 8;
+          frames.push({
+            transform: `translate(${startX + (endX - startX) * o}px, ${y + Math.sin(o * Math.PI * 2 + i) * bob}px) rotate(${r0 + Math.sin(o * Math.PI * 2 + i * 1.7) * 9}deg)`,
+            offset: o
+          });
+        }
+        const anim = el.animate(frames, { duration: dur, delay, fill: 'both', easing: 'linear' });
+        finished.push(anim.finished.catch(() => {}));
+        maxEnd = Math.max(maxEnd, delay + dur);
 
-      setTimeout(() => {
+        // 牆上對應的便利貼「被撕下」，飛過後貼回去
+        const wallEl = noteEls.get(String(item.id));
+        if (wallEl) {
+          setTimeout(() => wallEl.classList.add('peeled'), delay);
+          setTimeout(() => wallEl.classList.remove('peeled'), delay + dur);
+        }
+      });
+
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
         container.classList.add('hidden');
         container.innerHTML = '';
+        noteEls.forEach(el => el.classList.remove('peeled'));
         isSprintRunning = false;
-        if (!audio.paused) {
-          audio.volume = currentVol;
+        if (!audio.paused) audio.volume = currentVol;
+      };
+      Promise.all(finished).then(cleanup);
+      setTimeout(cleanup, maxEnd + 2500);                        // 保險：避免動畫事件沒觸發
+    }
+
+    // ===== 選單自動隱藏：開啟後保留 20 秒，之後滑鼠移到上緣才顯示 =====
+    let uiTimer = null, uiPinned = false, autoHideInited = false;
+
+    function showUI() { document.body.classList.add('ui-show'); clearTimeout(uiTimer); }
+    function scheduleHideUI(ms) { clearTimeout(uiTimer); uiTimer = setTimeout(hideUI, ms); }
+    function uiBusy() {
+      const a = document.activeElement;
+      if (a && a.closest && a.closest('.auto-ui') && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName)) return true;
+      const help = document.getElementById('help-modal');
+      if (help && !help.classList.contains('hidden')) return true;
+      return !!document.querySelector('.auto-ui:hover');
+    }
+    function hideUI() {
+      if (!document.body.classList.contains('autohide')) return;
+      if (uiPinned || uiBusy()) { scheduleHideUI(1500); return; }
+      document.body.classList.remove('ui-show');
+    }
+    function armAutoHide(ms) {
+      if (!document.body.classList.contains('autohide')) return;
+      showUI();
+      scheduleHideUI(ms);
+    }
+    function initAutoHide() {
+      if (autoHideInited) return;
+      autoHideInited = true;
+      document.addEventListener('mousemove', e => {
+        if (!document.body.classList.contains('autohide')) return;
+        if (e.clientY <= 70) { showUI(); scheduleHideUI(3000); }
+        else if (document.body.classList.contains('ui-show')) scheduleHideUI(2500);
+      });
+      document.addEventListener('keydown', e => {
+        if (!document.body.classList.contains('autohide')) return;
+        if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target && e.target.tagName) || '')) return;
+        if (e.key === 'h' || e.key === 'H') {            // H：固定顯示 / 取消固定
+          uiPinned = !uiPinned;
+          showUI();
+          if (!uiPinned) scheduleHideUI(2500);
         }
-      }, 7000);
+      });
+      armAutoHide(20000);                                   // 一開始保留 20 秒
     }
 
     // ===== 音樂播放（含內建晨光、本機音樂、自訂網址）=====
@@ -856,6 +1036,8 @@
 
     function changeMusic(value) {
       const audio = document.getElementById('bgm-player');
+      const sel = document.getElementById('music-select');
+      if (sel) sel.blur();               // 讓選單失去焦點，才能自動隱藏
       const resume = wantPlaying;
       if (value.startsWith('synth:')) {
         audio.pause();
@@ -954,6 +1136,7 @@
     function closeHelp() {
       document.getElementById('help-modal').classList.add('hidden');
       try { localStorage.setItem('pw-help-seen', '1'); } catch (e) {}
+      if (document.body.classList.contains('autohide')) { showUI(); scheduleHideUI(8000); }
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
 
